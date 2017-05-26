@@ -71,7 +71,7 @@ import Data.List (intercalate)
 import Data.IORef
 import qualified Data.Map as M
 import System.IO.Unsafe (unsafePerformIO)
-import System.Directory (getModificationTime)
+import System.Directory as Dir (getModificationTime)
 import Data.Time (UTCTime)
 import Text.Blaze.Html (preEscapedToHtml)
 
@@ -426,7 +426,7 @@ hamletFileWithSettings qhr set fp = do
 #ifdef GHC_7_4
     qAddDependentFile fp
 #endif
-    contents <- fmap TL.unpack $ qRunIO $ readUtf8File fp
+    contents <- fmap TL.unpack $ readUtf8FileQ fp
     hamletFromString qhr set contents
 
 -- | Like 'hamlet', but reads an external file at compile time.
@@ -569,7 +569,7 @@ readFileUtf8 fp = fmap TL.unpack $ readUtf8File fp
 
 -- move to Shakespeare.Base?
 readFileQ :: FilePath -> Q String
-readFileQ fp = qRunIO $ readFileUtf8 fp
+readFileQ fp = fmap TL.unpack $ readUtf8FileQ fp
 
 {-# NOINLINE reloadMapRef #-}
 reloadMapRef :: IORef (M.Map FilePath (MTime, [Content]))
@@ -603,7 +603,7 @@ hamletRuntime :: HamletSettings
               -> [(Deref, VarExp msg url)]
               -> Shakespeare url
 hamletRuntime settings fp cd render = unsafePerformIO $ do
-    mtime <- qRunIO $ getModificationTime fp
+    mtime <- qRunIO $ Dir.getModificationTime fp
     mdata <- lookupReloadMap fp
     case mdata of
       Just (lastMtime, lastContents) ->
@@ -624,7 +624,7 @@ hamletRuntimeMsg :: HamletSettings
               -> RuntimeVars msg url
               -> HtmlUrlI18n msg url
 hamletRuntimeMsg settings fp cd i18nRender render = unsafePerformIO $ do
-    mtime <- qRunIO $ getModificationTime fp
+    mtime <- qRunIO $ Dir.getModificationTime fp
     mdata <- lookupReloadMap fp
     case mdata of
       Just (lastMtime, lastContents) ->

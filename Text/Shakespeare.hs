@@ -40,7 +40,8 @@ import Text.ParserCombinators.Parsec hiding (Line, parse, Parser)
 import Text.Parsec.Prim (modifyState, Parsec)
 import Language.Haskell.TH.Quote (QuasiQuoter (..))
 import Language.Haskell.TH (appE)
-import Language.Haskell.TH.Syntax
+import Language.Haskell.TH.Syntax hiding (readProcessWithExitCode)
+import qualified Language.Haskell.TH.Syntax as TH
 #if !MIN_VERSION_template_haskell(2,8,0)
 import Language.Haskell.TH.Syntax.Internals
 #endif
@@ -51,7 +52,8 @@ import qualified Data.Text as TS
 import qualified Data.Text.Lazy as TL
 import Text.Shakespeare.Base
 
-import System.Directory (getModificationTime)
+import qualified System.Directory as Dir (getModificationTime)
+import qualified System.Process as Proc (readProcessWithExitCode)
 import Data.Time (UTCTime)
 import Data.IORef
 import qualified Data.Map as M
@@ -60,7 +62,6 @@ import Data.Typeable (Typeable)
 import Data.Data (Data)
 
 -- for pre conversion
-import System.Process (readProcessWithExitCode)
 import System.Exit (ExitCode(..))
 
 #if !MIN_VERSION_base(4,5,0)
@@ -77,7 +78,7 @@ parse p = runParser p []
 
 -- move to Shakespeare.Base?
 readFileQ :: FilePath -> Q String
-readFileQ fp = qRunIO $ readFileUtf8 fp
+readFileQ fp = fmap TL.unpack $ readUtf8FileQ fp
 
 -- move to Shakespeare.Base?
 readFileUtf8 :: FilePath -> IO String
@@ -198,6 +199,15 @@ data Content = ContentRaw String
     deriving (Show, Eq)
 type Contents = [Content]
 
+class Monad a => Proc a where
+  readProcessWithExitCode :: FilePath -> [String] -> String -> a (ExitCode, String, String)
+
+instance Proc IO where
+  readProcessWithExitCode cmd args = Proc.readProcessWithExitCode cmd args
+
+instance Proc Q where
+  readProcessWithExitCode cmd args = TH.readProcessWithExitCode cmd args
+
 eShowErrors :: Either ParseError c -> c
 eShowErrors = either (error . show) id
 
@@ -230,9 +240,9 @@ parseContents = many1 . parseContent
 
 
 -- | calls 'error' when there is stderr or exit code failure
-readProcessError :: FilePath -> [String] -> String
+readProcessError :: Proc m => FilePath -> [String] -> String
                  -> Maybe FilePath -- ^ for error reporting
-                 -> IO String
+                 -> m String
 readProcessError cmd args input mfp = do
   (ex, output, err) <- readProcessWithExitCode cmd args input
   case ex of
@@ -249,10 +259,10 @@ readProcessError cmd args input mfp = do
           Nothing -> ""
           Just fp -> ' ':fp
 
-preFilter :: Maybe FilePath -- ^ for error reporting
+preFilter :: Proc m => Maybe FilePath -- ^ for error reporting
           -> ShakespeareSettings
           -> String
-          -> IO String
+          -> m String
 preFilter mfp ShakespeareSettings {..} template =
     case preConversion of
       Nothing -> return template
@@ -386,7 +396,7 @@ shakespeare r = QuasiQuoter { quoteExp = shakespeareFromString r }
 
 shakespeareFromString :: ShakespeareSettings -> String -> Q Exp
 shakespeareFromString r str = do
-    s <- qRunIO $ preFilter Nothing r $
+    s <- preFilter Nothing r $
 #ifdef WINDOWS
           filter (/='\r')
 #endif
@@ -438,7 +448,7 @@ insertReloadMap fp (mt, content) = atomicModifyIORef reloadMapRef
 shakespeareFileReload :: ShakespeareSettings -> FilePath -> Q Exp
 shakespeareFileReload settings fp = do
     str <- readFileQ fp
-    s <- qRunIO $ preFilter (Just fp) settings str
+    s <- preFilter (Just fp) settings str
     let b = shakespeareUsedIdentifiers settings s
     c <- mapM vtToExp b
     rt <- [|shakespeareRuntime settings fp|]
@@ -465,7 +475,7 @@ nothingError expected d = error $ "expected " ++ expected ++ " but got Nothing f
 
 shakespeareRuntime :: ShakespeareSettings -> FilePath -> [(Deref, VarExp url)] -> Shakespeare url
 shakespeareRuntime settings fp cd render' = unsafePerformIO $ do
-    mtime <- qRunIO $ getModificationTime fp
+    mtime <- qRunIO $ Dir.getModificationTime fp
     mdata <- lookupReloadMap fp
     case mdata of
       Just (lastMtime, lastContents) ->
@@ -473,6 +483,7 @@ shakespeareRuntime settings fp cd render' = unsafePerformIO $ do
           else fmap go' $ newContent mtime
       Nothing -> fmap go' $ newContent mtime
   where
+    newContent :: UTCTime -> IO [Content]
     newContent mtime = do
         str <- readFileUtf8 fp
         s <- preFilter (Just fp) settings str

@@ -21,9 +21,10 @@ module Text.Shakespeare.Base
     , derefToExp
     , flattenDeref
     , readUtf8File
+    , readUtf8FileQ
     ) where
 
-import Language.Haskell.TH.Syntax
+import Language.Haskell.TH.Syntax as TH
 import Language.Haskell.TH (appE)
 import Data.Char (isUpper, isSymbol, isPunctuation, isAscii)
 import Text.ParserCombinators.Parsec
@@ -33,6 +34,7 @@ import Data.Ratio (Ratio, numerator, denominator, (%))
 import Data.Data (Data)
 import Data.Typeable (Typeable)
 import qualified Data.Text.Lazy as TL
+import qualified Data.Text.Encoding as TE
 import qualified System.IO as SIO
 import qualified Data.Text.Lazy.IO as TIO
 import Control.Monad (when)
@@ -283,6 +285,16 @@ readUtf8File fp = do
     SIO.hSetEncoding h SIO.utf8_bom
     ret <- TIO.hGetContents h 
     return $
+#ifdef WINDOWS
+      TL.filter ('\r'/=) ret
+#else
+      ret
+#endif
+
+readUtf8FileQ :: FilePath -> Q TL.Text
+readUtf8FileQ fp = do
+    ret <- TL.fromStrict . TE.decodeUtf8 <$> TH.readFileBS fp
+    return $ 
 #ifdef WINDOWS
       TL.filter ('\r'/=) ret
 #else

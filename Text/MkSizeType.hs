@@ -3,7 +3,8 @@
 -- | Internal functions to generate CSS size wrapper types.
 module Text.MkSizeType (mkSizeType) where
 
-#if MIN_VERSION_template_haskell(2,11,0)
+#if MIN_VERSION_template_haskell(2,12,0)
+#elif MIN_VERSION_template_haskell(2,11,0)
 import Language.Haskell.TH (conT)
 #endif
 import Language.Haskell.TH.Syntax
